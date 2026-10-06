@@ -157,6 +157,11 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             send_frame(self.sender, "x" * MAX_FRAME_BYTES)
 
+    def test_outgoing_non_text_messages_are_rejected(self):
+        for value in (None, {}, 123, b"bytes"):
+            with self.subTest(value=value), self.assertRaises(TypeError):
+                send_frame(self.sender, value)
+
 
 if __name__ == "__main__":
     unittest.main()
