@@ -20,6 +20,26 @@ except FileNotFoundError:
 clients = {}
 clients_lock = threading.Lock()
 
+def deliver(target, message):
+    with clients_lock:
+        connection = clients.get(target)
+    if connection is None:
+        return False
+    try:
+        send_frame(connection, message)
+        return True
+    except OSError:
+        with clients_lock:
+            if clients.get(target) is connection:
+                clients.pop(target, None)
+        try:
+            connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        connection.close()
+        return False
+
+
 def handle_client(conn, addr):
     print(f"Новое подключение: {addr}")
     username = None
@@ -55,17 +75,12 @@ def handle_client(conn, addr):
                     if len(parts) < 3:
                         continue
                     target, text = parts[1], parts[2]
-                    with clients_lock:
-                        target_conn = clients.get(target)
-                    if target_conn is not None:
-                        send_frame(target_conn, f"[PM {username}]: {text}")
+                    if not deliver(target, f"[PM {username}]: {text}"):
+                        send_frame(conn, f"Error: recipient {target} is not connected")
                 else:
                     friends = users.get(username, {}).get('friends', [])
                     for friend in friends:
-                        with clients_lock:
-                            target_conn = clients.get(friend)
-                        if target_conn is not None:
-                            send_frame(target_conn, f"[{username}]: {msg}")
+                        deliver(friend, f"[{username}]: {msg}")
     except (OSError, ValueError, UnicodeError) as error:
         print(f"Соединение {addr} закрыто: {error}")
     finally:

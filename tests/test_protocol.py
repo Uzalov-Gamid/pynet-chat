@@ -162,6 +162,36 @@ class ProtocolTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(TypeError):
                 send_frame(self.sender, value)
 
+    def test_stale_recipient_does_not_disconnect_sender(self):
+        from server import server
+        stale, stale_peer = socket.socketpair()
+        stale.close()
+        target, peer = socket.socketpair()
+        peer.settimeout(2)
+        server.clients.update(bob=stale, carol=target)
+        reader = peer.makefile("rb")
+        replies = self.sender.makefile("rb")
+        worker = threading.Thread(target=server.handle_client, args=(self.receiver, ("local", 0)), daemon=True)
+        try:
+            worker.start()
+            send_frame(self.sender, "alice")
+            send_frame(self.sender, "/msg bob hello")
+            send_frame(self.sender, "/msg carol still connected")
+            self.assertEqual(receive_frame(reader), "[PM alice]: still connected")
+            self.assertIn("not connected", receive_frame(replies))
+            self.assertNotIn("bob", server.clients)
+        finally:
+            self.sender.shutdown(socket.SHUT_WR)
+            worker.join(2)
+            server.clients.pop("bob", None)
+            server.clients.pop("carol", None)
+            reader.close()
+            replies.close()
+            target.close()
+            peer.close()
+            stale_peer.close()
+        self.assertFalse(worker.is_alive())
+
 
 if __name__ == "__main__":
     unittest.main()
