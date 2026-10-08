@@ -34,8 +34,7 @@ if username not in users:
     with open(DATA_FILE, 'w') as f:
         json.dump(users, f)
 
-client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect((HOST, PORT))
+client = socket.create_connection((HOST, PORT))
 send_frame(client, username)
 send_frame(client, "/friends " + json.dumps(users[username]["friends"], ensure_ascii=False))
 

@@ -192,6 +192,20 @@ class ProtocolTests(unittest.TestCase):
             stale_peer.close()
         self.assertFalse(worker.is_alive())
 
+    def test_ipv6_loopback_accepts_framed_messages(self):
+        from server import server
+        try:
+            listener = server.listening_socket("::1", 0)
+        except OSError:
+            self.skipTest("IPv6 loopback is unavailable")
+        with listener:
+            listener.settimeout(2)
+            with socket.create_connection(listener.getsockname()[:2], timeout=2) as client:
+                connection, _ = listener.accept()
+                with connection, connection.makefile("rb") as reader:
+                    send_frame(client, "IPv6 hello")
+                    self.assertEqual(receive_frame(reader), "IPv6 hello")
+
 
 if __name__ == "__main__":
     unittest.main()

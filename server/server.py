@@ -90,11 +90,21 @@ def handle_client(conn, addr):
         conn.close()
 
 
+def listening_socket(host, port):
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    server = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((host, port))
+        server.listen()
+    except BaseException:
+        server.close()
+        raise
+    return server
+
+
 def start_server(host=HOST, port=PORT):
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((host, port))
-    server.listen()
+    server = listening_socket(host, port)
     print(f"Сервер запущен на {host}:{port}")
 
     while True:
