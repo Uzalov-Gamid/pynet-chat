@@ -2,7 +2,12 @@ import socket
 import threading
 import json
 import os
+import sys
+from pathlib import Path
 from datetime import datetime
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from protocol import receive_frame, send_frame
 
 HOST = '127.0.0.1'
 PORT = 12345
@@ -30,7 +35,7 @@ if username not in users:
 
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect((HOST, PORT))
-client.send(username.encode())
+send_frame(client, username)
 
 chat_history = []
 
@@ -43,15 +48,18 @@ def print_chat():
     print("-"*40)
 
 def receive_messages():
-    while True:
-        try:
-            msg = client.recv(1024).decode()
-            if msg:
+    try:
+        with client.makefile("rb") as reader:
+            while True:
+                msg = receive_frame(reader)
+                if msg is None:
+                    break
                 timestamp = datetime.now().strftime("%H:%M")
                 chat_history.append(f"{Colors.FRIEND}[{timestamp}] {msg}{Colors.RESET}")
                 print_chat()
-        except:
-            break
+    except (OSError, ValueError, UnicodeError) as error:
+        print(f"Соединение закрыто: {error}")
+
 
 threading.Thread(target=receive_messages, daemon=True).start()
 
@@ -88,11 +96,11 @@ def back_chat():
 def send_message(text):
     timestamp = datetime.now().strftime("%H:%M")
     if current_chat:
-        client.send(f"/msg {current_chat} {text}".encode())
+        send_frame(client, f"/msg {current_chat} {text}")
         chat_history.append(f"{Colors.YOU}[{timestamp}] [PM You]: {text}{Colors.RESET}")
         print_chat()
     else:
-        client.send(text.encode())
+        send_frame(client, text)
         chat_history.append(f"{Colors.YOU}[{timestamp}] [PM You to all friends]: {text}{Colors.RESET}")
         print_chat()
 

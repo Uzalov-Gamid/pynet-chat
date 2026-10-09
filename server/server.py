@@ -1,6 +1,11 @@
 import socket
 import threading
 import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from protocol import receive_frame, send_frame
 
 HOST = '127.0.0.1'
 PORT = 12345
@@ -16,34 +21,36 @@ clients = {}
 
 def handle_client(conn, addr):
     print(f"Новое подключение: {addr}")
-    username = conn.recv(1024).decode()
-    clients[username] = conn
+    username = None
+    try:
+        with conn.makefile("rb") as reader:
+            username = receive_frame(reader)
+            if not username:
+                return
+            clients[username] = conn
+            while True:
+                msg = receive_frame(reader)
+                if msg is None:
+                    break
+                if msg.startswith("/msg "):
+                    parts = msg.split(" ", 2)
+                    if len(parts) < 3:
+                        continue
+                    target, text = parts[1], parts[2]
+                    if target in clients:
+                        send_frame(clients[target], f"[PM {username}]: {text}")
+                else:
+                    friends = users.get(username, {}).get('friends', [])
+                    for friend in friends:
+                        if friend in clients:
+                            send_frame(clients[friend], f"[{username}]: {msg}")
+    except (OSError, ValueError, UnicodeError) as error:
+        print(f"Соединение {addr} закрыто: {error}")
+    finally:
+        if clients.get(username) is conn:
+            clients.pop(username, None)
+        conn.close()
 
-    while True:
-        try:
-            msg = conn.recv(1024).decode()
-            if not msg:
-                break
-
-            if msg.startswith("/msg "):
-                parts = msg.split(" ", 2)
-                if len(parts) < 3:
-                    continue
-                target, text = parts[1], parts[2]
-                if target in clients:
-                    clients[target].send(f"[PM {username}]: {text}".encode())
-
-            else:
-                friends = users.get(username, {}).get('friends', [])
-                for friend in friends:
-                    if friend in clients:
-                        clients[friend].send(f"[{username}]: {msg}".encode())
-
-        except:
-            break
-
-    conn.close()
-    del clients[username]
 
 def start_server():
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
