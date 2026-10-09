@@ -206,6 +206,15 @@ class ProtocolTests(unittest.TestCase):
                     send_frame(client, "IPv6 hello")
                     self.assertEqual(receive_frame(reader), "IPv6 hello")
 
+    def test_idle_handshake_does_not_hold_a_worker_forever(self):
+        from server import server
+        from unittest.mock import patch
+        with patch.object(server, "HANDSHAKE_TIMEOUT", 0.05):
+            worker = threading.Thread(target=server.handle_client, args=(self.receiver, ("local", 0)), daemon=True)
+            worker.start()
+            worker.join(1)
+        self.assertFalse(worker.is_alive())
+
 
 if __name__ == "__main__":
     unittest.main()

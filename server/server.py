@@ -9,6 +9,7 @@ from protocol import connection_options, receive_frame, send_frame
 
 HOST = '127.0.0.1'
 PORT = 12345
+HANDSHAKE_TIMEOUT = 10.0
 
 
 try:
@@ -44,8 +45,11 @@ def handle_client(conn, addr):
     print(f"Новое подключение: {addr}")
     username = None
     try:
+        previous_timeout = conn.gettimeout()
+        conn.settimeout(HANDSHAKE_TIMEOUT)
         with conn.makefile("rb") as reader:
             username = receive_frame(reader)
+            conn.settimeout(previous_timeout)
             if not username:
                 return
             if len(username) > 64 or any(char.isspace() for char in username):
