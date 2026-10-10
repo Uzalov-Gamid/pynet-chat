@@ -107,14 +107,53 @@ def listening_socket(host, port):
     return server
 
 
-def start_server(host=HOST, port=PORT):
-    server = listening_socket(host, port)
-    print(f"Сервер запущен на {host}:{port}")
+def serve(listener, stop_event):
+    listener.settimeout(0.2)
+    active = set()
+    workers = set()
+    tracking_lock = threading.Lock()
 
-    while True:
-        conn, addr = server.accept()
-        thread = threading.Thread(target=handle_client, args=(conn, addr))
-        thread.start()
+    def handle(connection, address):
+        try:
+            handle_client(connection, address)
+        finally:
+            with tracking_lock:
+                active.discard(connection)
+                workers.discard(threading.current_thread())
+
+    try:
+        while not stop_event.is_set():
+            try:
+                connection, address = listener.accept()
+            except socket.timeout:
+                continue
+            worker = threading.Thread(target=handle, args=(connection, address), daemon=True)
+            with tracking_lock:
+                active.add(connection)
+                workers.add(worker)
+            worker.start()
+    finally:
+        with tracking_lock:
+            connections = list(active)
+            pending = list(workers)
+        for connection in connections:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            connection.close()
+        for worker in pending:
+            worker.join(timeout=2)
+
+
+def start_server(host=HOST, port=PORT, stop_event=None):
+    with listening_socket(host, port) as listener:
+        print(f"Server listening on {host}:{listener.getsockname()[1]}")
+        try:
+            serve(listener, stop_event if stop_event is not None else threading.Event())
+        except KeyboardInterrupt:
+            pass
+
 
 if __name__ == "__main__":
     args = connection_options()

@@ -215,6 +215,23 @@ class ProtocolTests(unittest.TestCase):
             worker.join(1)
         self.assertFalse(worker.is_alive())
 
+    def test_server_stop_closes_pending_connections_and_workers(self):
+        from server import server
+        stop = threading.Event()
+        with server.listening_socket("127.0.0.1", 0) as listener:
+            worker = threading.Thread(target=server.serve, args=(listener, stop), daemon=True)
+            worker.start()
+            with socket.create_connection(listener.getsockname(), timeout=2) as peer:
+                send_frame(peer, "shutdown-test")
+                send_frame(peer, "/msg nobody shutdown-probe")
+                with peer.makefile("rb") as response:
+                    self.assertIn("not connected", receive_frame(response))
+                stop.set()
+                worker.join(2)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(peer.recv(1), b"")
+        self.assertNotIn("shutdown-test", server.clients)
+
 
 if __name__ == "__main__":
     unittest.main()
