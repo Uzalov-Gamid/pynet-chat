@@ -18,6 +18,7 @@ except FileNotFoundError:
     users = {}
 
 clients = {}
+clients_lock = threading.Lock()
 
 def handle_client(conn, addr):
     print(f"Новое подключение: {addr}")
@@ -27,7 +28,16 @@ def handle_client(conn, addr):
             username = receive_frame(reader)
             if not username:
                 return
-            clients[username] = conn
+            if len(username) > 64 or any(char.isspace() for char in username):
+                send_frame(conn, "Error: invalid username")
+                return
+            with clients_lock:
+                duplicate = username in clients
+                if not duplicate:
+                    clients[username] = conn
+            if duplicate:
+                send_frame(conn, "Error: username is already connected")
+                return
             while True:
                 msg = receive_frame(reader)
                 if msg is None:
@@ -37,18 +47,23 @@ def handle_client(conn, addr):
                     if len(parts) < 3:
                         continue
                     target, text = parts[1], parts[2]
-                    if target in clients:
-                        send_frame(clients[target], f"[PM {username}]: {text}")
+                    with clients_lock:
+                        target_conn = clients.get(target)
+                    if target_conn is not None:
+                        send_frame(target_conn, f"[PM {username}]: {text}")
                 else:
                     friends = users.get(username, {}).get('friends', [])
                     for friend in friends:
-                        if friend in clients:
-                            send_frame(clients[friend], f"[{username}]: {msg}")
+                        with clients_lock:
+                            target_conn = clients.get(friend)
+                        if target_conn is not None:
+                            send_frame(target_conn, f"[{username}]: {msg}")
     except (OSError, ValueError, UnicodeError) as error:
         print(f"Соединение {addr} закрыто: {error}")
     finally:
-        if clients.get(username) is conn:
-            clients.pop(username, None)
+        with clients_lock:
+            if clients.get(username) is conn:
+                clients.pop(username, None)
         conn.close()
 
 

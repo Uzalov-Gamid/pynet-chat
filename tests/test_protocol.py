@@ -78,6 +78,26 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
         self.assertNotIn("alice", server.clients)
 
+    def test_duplicate_username_does_not_replace_connected_user(self):
+        from server import server
+        original, peer = socket.socketpair()
+        server.clients["alice"] = original
+        worker = threading.Thread(target=server.handle_client,
+                                  args=(self.receiver, ("local", 0)), daemon=True)
+        reader = self.sender.makefile("rb")
+        try:
+            worker.start()
+            send_frame(self.sender, "alice")
+            self.assertIn("already connected", receive_frame(reader))
+            worker.join(timeout=2)
+            self.assertIs(server.clients["alice"], original)
+        finally:
+            server.clients.pop("alice", None)
+            reader.close()
+            original.close()
+            peer.close()
+        self.assertFalse(worker.is_alive())
+
     def test_oversized_send_rejected(self):
         with self.assertRaises(ValueError):
             send_frame(self.sender, "x" * MAX_FRAME_BYTES)
