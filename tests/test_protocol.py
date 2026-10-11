@@ -232,6 +232,13 @@ class ProtocolTests(unittest.TestCase):
                 self.assertEqual(peer.recv(1), b"")
         self.assertNotIn("shutdown-test", server.clients)
 
+    def test_client_import_does_not_prompt_or_connect(self):
+        import importlib
+        from unittest.mock import patch
+        with patch("builtins.input", side_effect=AssertionError("unexpected prompt")), patch("socket.create_connection", side_effect=AssertionError("unexpected connection")):
+            module = importlib.import_module("client.client")
+            self.assertTrue(callable(module.main))
+
 
 if __name__ == "__main__":
     unittest.main()
