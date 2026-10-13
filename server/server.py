@@ -42,6 +42,14 @@ def handle_client(conn, addr):
                 msg = receive_frame(reader)
                 if msg is None:
                     break
+                if msg.startswith("/friends "):
+                    friends = json.loads(msg[len("/friends "):])
+                    if (not isinstance(friends, list) or len(friends) > 1000 or
+                            any(not isinstance(name, str) or not name or len(name) > 64 or
+                                any(char.isspace() for char in name) for name in friends)):
+                        raise ValueError("Invalid friend list")
+                    users.setdefault(username, {})["friends"] = list(dict.fromkeys(friends))
+                    continue
                 if msg.startswith("/msg "):
                     parts = msg.split(" ", 2)
                     if len(parts) < 3:

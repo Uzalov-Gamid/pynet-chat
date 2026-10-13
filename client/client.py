@@ -36,6 +36,7 @@ if username not in users:
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect((HOST, PORT))
 send_frame(client, username)
+send_frame(client, "/friends " + json.dumps(users[username]["friends"], ensure_ascii=False))
 
 chat_history = []
 
@@ -70,6 +71,7 @@ def add_friend(name):
         users[username]["friends"].append(name)
         with open(DATA_FILE, 'w') as f:
             json.dump(users, f)
+        send_frame(client, "/friends " + json.dumps(users[username]["friends"], ensure_ascii=False))
         chat_history.append(f"{Colors.INFO}Добавлен друг: {name}{Colors.RESET}")
         print_chat()
     else:

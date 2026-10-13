@@ -98,6 +98,30 @@ class ProtocolTests(unittest.TestCase):
             peer.close()
         self.assertFalse(worker.is_alive())
 
+    def test_friend_update_takes_effect_without_server_restart(self):
+        from server import server
+        target, target_peer = socket.socketpair()
+        target_peer.settimeout(2)
+        server.clients["bob"] = target
+        reader = target_peer.makefile("rb")
+        worker = threading.Thread(target=server.handle_client,
+                                  args=(self.receiver, ("local", 0)), daemon=True)
+        try:
+            worker.start()
+            send_frame(self.sender, "alice")
+            send_frame(self.sender, '/friends ["bob"]')
+            send_frame(self.sender, "hello friends")
+            self.assertEqual(receive_frame(reader), "[alice]: hello friends")
+        finally:
+            self.sender.shutdown(socket.SHUT_WR)
+            worker.join(timeout=2)
+            server.clients.pop("bob", None)
+            server.users.pop("alice", None)
+            reader.close()
+            target.close()
+            target_peer.close()
+        self.assertFalse(worker.is_alive())
+
     def test_oversized_send_rejected(self):
         with self.assertRaises(ValueError):
             send_frame(self.sender, "x" * MAX_FRAME_BYTES)
