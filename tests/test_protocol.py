@@ -122,6 +122,25 @@ class ProtocolTests(unittest.TestCase):
             target_peer.close()
         self.assertFalse(worker.is_alive())
 
+    def test_concurrent_senders_preserve_large_frames(self):
+        messages = ["a" * 10000, "б" * 10000]
+        errors = []
+        def write(message):
+            try:
+                for _ in range(5):
+                    send_frame(self.sender, message)
+            except Exception as error:
+                errors.append(error)
+        workers = [threading.Thread(target=write, args=(message,)) for message in messages]
+        for worker in workers:
+            worker.start()
+        received = [receive_frame(self.reader) for _ in range(10)]
+        for worker in workers:
+            worker.join(timeout=2)
+            self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertCountEqual(received, messages * 5)
+
     def test_oversized_send_rejected(self):
         with self.assertRaises(ValueError):
             send_frame(self.sender, "x" * MAX_FRAME_BYTES)
