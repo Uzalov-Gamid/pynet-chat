@@ -74,3 +74,10 @@ python client/client.py --host 127.0.0.1 --port 23456
 
 Запускайте команды в отдельных терминалах из корня репозитория.
 Без параметров используются `127.0.0.1:12345`.
+
+## Guides
+
+- [Running clients and servers](docs/running.md)
+- [Wire protocol](docs/protocol.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Development and tests](docs/development.md)
