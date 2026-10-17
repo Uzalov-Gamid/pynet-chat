@@ -9,6 +9,7 @@ from protocol import connection_options, receive_frame, send_frame
 
 HOST = '127.0.0.1'
 PORT = 12345
+HANDSHAKE_TIMEOUT = 10.0
 
 
 try:
@@ -20,12 +21,35 @@ except FileNotFoundError:
 clients = {}
 clients_lock = threading.Lock()
 
+def deliver(target, message):
+    with clients_lock:
+        connection = clients.get(target)
+    if connection is None:
+        return False
+    try:
+        send_frame(connection, message)
+        return True
+    except OSError:
+        with clients_lock:
+            if clients.get(target) is connection:
+                clients.pop(target, None)
+        try:
+            connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        connection.close()
+        return False
+
+
 def handle_client(conn, addr):
     print(f"Новое подключение: {addr}")
     username = None
     try:
+        previous_timeout = conn.gettimeout()
+        conn.settimeout(HANDSHAKE_TIMEOUT)
         with conn.makefile("rb") as reader:
             username = receive_frame(reader)
+            conn.settimeout(previous_timeout)
             if not username:
                 return
             if len(username) > 64 or any(char.isspace() for char in username):
@@ -55,17 +79,12 @@ def handle_client(conn, addr):
                     if len(parts) < 3:
                         continue
                     target, text = parts[1], parts[2]
-                    with clients_lock:
-                        target_conn = clients.get(target)
-                    if target_conn is not None:
-                        send_frame(target_conn, f"[PM {username}]: {text}")
+                    if not deliver(target, f"[PM {username}]: {text}"):
+                        send_frame(conn, f"Error: recipient {target} is not connected")
                 else:
                     friends = users.get(username, {}).get('friends', [])
                     for friend in friends:
-                        with clients_lock:
-                            target_conn = clients.get(friend)
-                        if target_conn is not None:
-                            send_frame(target_conn, f"[{username}]: {msg}")
+                        deliver(friend, f"[{username}]: {msg}")
     except (OSError, ValueError, UnicodeError) as error:
         print(f"Соединение {addr} закрыто: {error}")
     finally:
@@ -75,17 +94,66 @@ def handle_client(conn, addr):
         conn.close()
 
 
-def start_server(host=HOST, port=PORT):
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((host, port))
-    server.listen()
-    print(f"Сервер запущен на {host}:{port}")
+def listening_socket(host, port):
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    server = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((host, port))
+        server.listen()
+    except BaseException:
+        server.close()
+        raise
+    return server
 
-    while True:
-        conn, addr = server.accept()
-        thread = threading.Thread(target=handle_client, args=(conn, addr))
-        thread.start()
+
+def serve(listener, stop_event):
+    listener.settimeout(0.2)
+    active = set()
+    workers = set()
+    tracking_lock = threading.Lock()
+
+    def handle(connection, address):
+        try:
+            handle_client(connection, address)
+        finally:
+            with tracking_lock:
+                active.discard(connection)
+                workers.discard(threading.current_thread())
+
+    try:
+        while not stop_event.is_set():
+            try:
+                connection, address = listener.accept()
+            except socket.timeout:
+                continue
+            worker = threading.Thread(target=handle, args=(connection, address), daemon=True)
+            with tracking_lock:
+                active.add(connection)
+                workers.add(worker)
+            worker.start()
+    finally:
+        with tracking_lock:
+            connections = list(active)
+            pending = list(workers)
+        for connection in connections:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            connection.close()
+        for worker in pending:
+            worker.join(timeout=2)
+
+
+def start_server(host=HOST, port=PORT, stop_event=None):
+    with listening_socket(host, port) as listener:
+        print(f"Server listening on {host}:{listener.getsockname()[1]}")
+        try:
+            serve(listener, stop_event if stop_event is not None else threading.Event())
+        except KeyboardInterrupt:
+            pass
+
 
 if __name__ == "__main__":
     args = connection_options()

@@ -157,6 +157,88 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             send_frame(self.sender, "x" * MAX_FRAME_BYTES)
 
+    def test_outgoing_non_text_messages_are_rejected(self):
+        for value in (None, {}, 123, b"bytes"):
+            with self.subTest(value=value), self.assertRaises(TypeError):
+                send_frame(self.sender, value)
+
+    def test_stale_recipient_does_not_disconnect_sender(self):
+        from server import server
+        stale, stale_peer = socket.socketpair()
+        stale.close()
+        target, peer = socket.socketpair()
+        peer.settimeout(2)
+        server.clients.update(bob=stale, carol=target)
+        reader = peer.makefile("rb")
+        replies = self.sender.makefile("rb")
+        worker = threading.Thread(target=server.handle_client, args=(self.receiver, ("local", 0)), daemon=True)
+        try:
+            worker.start()
+            send_frame(self.sender, "alice")
+            send_frame(self.sender, "/msg bob hello")
+            send_frame(self.sender, "/msg carol still connected")
+            self.assertEqual(receive_frame(reader), "[PM alice]: still connected")
+            self.assertIn("not connected", receive_frame(replies))
+            self.assertNotIn("bob", server.clients)
+        finally:
+            self.sender.shutdown(socket.SHUT_WR)
+            worker.join(2)
+            server.clients.pop("bob", None)
+            server.clients.pop("carol", None)
+            reader.close()
+            replies.close()
+            target.close()
+            peer.close()
+            stale_peer.close()
+        self.assertFalse(worker.is_alive())
+
+    def test_ipv6_loopback_accepts_framed_messages(self):
+        from server import server
+        try:
+            listener = server.listening_socket("::1", 0)
+        except OSError:
+            self.skipTest("IPv6 loopback is unavailable")
+        with listener:
+            listener.settimeout(2)
+            with socket.create_connection(listener.getsockname()[:2], timeout=2) as client:
+                connection, _ = listener.accept()
+                with connection, connection.makefile("rb") as reader:
+                    send_frame(client, "IPv6 hello")
+                    self.assertEqual(receive_frame(reader), "IPv6 hello")
+
+    def test_idle_handshake_does_not_hold_a_worker_forever(self):
+        from server import server
+        from unittest.mock import patch
+        with patch.object(server, "HANDSHAKE_TIMEOUT", 0.05):
+            worker = threading.Thread(target=server.handle_client, args=(self.receiver, ("local", 0)), daemon=True)
+            worker.start()
+            worker.join(1)
+        self.assertFalse(worker.is_alive())
+
+    def test_server_stop_closes_pending_connections_and_workers(self):
+        from server import server
+        stop = threading.Event()
+        with server.listening_socket("127.0.0.1", 0) as listener:
+            worker = threading.Thread(target=server.serve, args=(listener, stop), daemon=True)
+            worker.start()
+            with socket.create_connection(listener.getsockname(), timeout=2) as peer:
+                send_frame(peer, "shutdown-test")
+                send_frame(peer, "/msg nobody shutdown-probe")
+                with peer.makefile("rb") as response:
+                    self.assertIn("not connected", receive_frame(response))
+                stop.set()
+                worker.join(2)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(peer.recv(1), b"")
+        self.assertNotIn("shutdown-test", server.clients)
+
+    def test_client_import_does_not_prompt_or_connect(self):
+        import importlib
+        from unittest.mock import patch
+        with patch("builtins.input", side_effect=AssertionError("unexpected prompt")), patch("socket.create_connection", side_effect=AssertionError("unexpected connection")):
+            module = importlib.import_module("client.client")
+            self.assertTrue(callable(module.main))
+
 
 if __name__ == "__main__":
     unittest.main()

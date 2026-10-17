@@ -10,6 +10,8 @@ _locks_guard = threading.Lock()
 
 
 def send_frame(connection, message):
+    if not isinstance(message, str):
+        raise TypeError("Message must be a string")
     frame = json.dumps(message, ensure_ascii=False).encode("utf-8") + b"\n"
     if len(frame) > MAX_FRAME_BYTES:
         raise ValueError("Message exceeds frame size limit")
