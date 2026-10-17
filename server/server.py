@@ -1,6 +1,11 @@
 import socket
 import threading
 import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from protocol import connection_options, receive_frame, send_frame
 
 HOST = '127.0.0.1'
 PORT = 12345
@@ -13,43 +18,69 @@ except FileNotFoundError:
     users = {}
 
 clients = {}
+clients_lock = threading.Lock()
 
 def handle_client(conn, addr):
     print(f"Новое подключение: {addr}")
-    username = conn.recv(1024).decode()
-    clients[username] = conn
-
-    while True:
-        try:
-            msg = conn.recv(1024).decode()
-            if not msg:
-                break
-
-            if msg.startswith("/msg "):
-                parts = msg.split(" ", 2)
-                if len(parts) < 3:
+    username = None
+    try:
+        with conn.makefile("rb") as reader:
+            username = receive_frame(reader)
+            if not username:
+                return
+            if len(username) > 64 or any(char.isspace() for char in username):
+                send_frame(conn, "Error: invalid username")
+                return
+            with clients_lock:
+                duplicate = username in clients
+                if not duplicate:
+                    clients[username] = conn
+            if duplicate:
+                send_frame(conn, "Error: username is already connected")
+                return
+            while True:
+                msg = receive_frame(reader)
+                if msg is None:
+                    break
+                if msg.startswith("/friends "):
+                    friends = json.loads(msg[len("/friends "):])
+                    if (not isinstance(friends, list) or len(friends) > 1000 or
+                            any(not isinstance(name, str) or not name or len(name) > 64 or
+                                any(char.isspace() for char in name) for name in friends)):
+                        raise ValueError("Invalid friend list")
+                    users.setdefault(username, {})["friends"] = list(dict.fromkeys(friends))
                     continue
-                target, text = parts[1], parts[2]
-                if target in clients:
-                    clients[target].send(f"[PM {username}]: {text}".encode())
+                if msg.startswith("/msg "):
+                    parts = msg.split(" ", 2)
+                    if len(parts) < 3:
+                        continue
+                    target, text = parts[1], parts[2]
+                    with clients_lock:
+                        target_conn = clients.get(target)
+                    if target_conn is not None:
+                        send_frame(target_conn, f"[PM {username}]: {text}")
+                else:
+                    friends = users.get(username, {}).get('friends', [])
+                    for friend in friends:
+                        with clients_lock:
+                            target_conn = clients.get(friend)
+                        if target_conn is not None:
+                            send_frame(target_conn, f"[{username}]: {msg}")
+    except (OSError, ValueError, UnicodeError) as error:
+        print(f"Соединение {addr} закрыто: {error}")
+    finally:
+        with clients_lock:
+            if clients.get(username) is conn:
+                clients.pop(username, None)
+        conn.close()
 
-            else:
-                friends = users.get(username, {}).get('friends', [])
-                for friend in friends:
-                    if friend in clients:
-                        clients[friend].send(f"[{username}]: {msg}".encode())
 
-        except:
-            break
-
-    conn.close()
-    del clients[username]
-
-def start_server():
+def start_server(host=HOST, port=PORT):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((HOST, PORT))
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((host, port))
     server.listen()
-    print(f"Сервер запущен на {HOST}:{PORT}")
+    print(f"Сервер запущен на {host}:{port}")
 
     while True:
         conn, addr = server.accept()
@@ -57,4 +88,5 @@ def start_server():
         thread.start()
 
 if __name__ == "__main__":
-    start_server()
+    args = connection_options()
+    start_server(args.host, args.port)
