@@ -7,10 +7,11 @@ from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from protocol import receive_frame, send_frame
+from protocol import connection_options, receive_frame, send_frame
 
-HOST = '127.0.0.1'
-PORT = 12345
+options = connection_options()
+HOST = options.host
+PORT = options.port
 DATA_FILE = 'data.json'
 
 class Colors:

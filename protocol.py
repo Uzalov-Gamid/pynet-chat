@@ -1,4 +1,5 @@
 """JSON string frames, separated by newlines, over a TCP byte stream."""
+import argparse
 import json
 import threading
 import weakref
@@ -28,3 +29,13 @@ def receive_frame(reader):
     if not isinstance(message, str):
         raise ValueError("Message must be a string")
     return message
+
+
+def connection_options(argv=None):
+    parser = argparse.ArgumentParser(description="PyNet TCP chat")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=12345)
+    args = parser.parse_args(argv)
+    if not 1 <= args.port <= 65535:
+        parser.error("--port must be between 1 and 65535")
+    return args

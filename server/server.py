@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from protocol import receive_frame, send_frame
+from protocol import connection_options, receive_frame, send_frame
 
 HOST = '127.0.0.1'
 PORT = 12345
@@ -75,11 +75,12 @@ def handle_client(conn, addr):
         conn.close()
 
 
-def start_server():
+def start_server(host=HOST, port=PORT):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((HOST, PORT))
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((host, port))
     server.listen()
-    print(f"Сервер запущен на {HOST}:{PORT}")
+    print(f"Сервер запущен на {host}:{port}")
 
     while True:
         conn, addr = server.accept()
@@ -87,4 +88,5 @@ def start_server():
         thread.start()
 
 if __name__ == "__main__":
-    start_server()
+    args = connection_options()
+    start_server(args.host, args.port)

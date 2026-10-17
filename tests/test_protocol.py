@@ -141,6 +141,18 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertCountEqual(received, messages * 5)
 
+    def test_client_and_server_help_do_not_start_interactive_sessions(self):
+        import subprocess
+        import sys
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        for script in ("client/client.py", "server/server.py"):
+            result = subprocess.run([sys.executable, str(root / script), "--help"],
+                                    capture_output=True, text=True, timeout=3)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--host", result.stdout)
+            self.assertIn("--port", result.stdout)
+
     def test_oversized_send_rejected(self):
         with self.assertRaises(ValueError):
             send_frame(self.sender, "x" * MAX_FRAME_BYTES)
